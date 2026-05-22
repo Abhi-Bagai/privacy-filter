@@ -1,0 +1,20 @@
+{
+  "allowedTools": [
+    "*"],
+  "permissions": {
+    "allow": [
+      "*",
+      "Bash(ssh:*)",
+      "Bash(*)",
+      "Bash(rsync:*)",
+      "Bash(scp --help)",
+      "Bash(tar czf:*)",
+      "Bash(scp -i ~/.ssh/jetson_key /tmp/privacy-engine.tar.gz abhi@192.168.1.100:/tmp/)",
+      "Bash(ls:*)",
+      "Bash(pip install:*)",
+      "Bash(scp -i ~/.ssh/jetson_key \"/c/Users/a_bag/Documents/Agentic AI Services/Privacy Filter\\(Obfuscation Engine\\)/privacy-engine-v0.1/models.py\" \"abhi@192.168.1.100:/tmp/models.py\")",
+      "Bash(scp -i ~/.ssh/jetson_key \"/c/Users/a_bag/Documents/Agentic AI Services/Privacy Filter\\(Obfuscation Engine\\)/privacy-engine-v0.1/logging_config.py\" \"abhi@192.168.1.100:/tmp/logging_config.py\")",
+      "Bash(scp -i ~/.ssh/jetson_key \"/c/Users/a_bag/Documents/Agentic AI Services/Privacy Filter\\(Obfuscation Engine\\)/privacy-engine-v0.1/systemd/privacy-engine.service\" \"abhi@192.168.1.100:/tmp/privacy-engine.service\")"
+    ]
+  }
+}

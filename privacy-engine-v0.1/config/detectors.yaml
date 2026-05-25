@@ -1,0 +1,101 @@
+# Privacy Engine v0.1 - Detector Configuration
+#
+# Add new PII types here without modifying code.
+# Reload with: sudo systemctl reload privacy-engine
+#
+# Validators: luhn, canadian_sin, none
+
+detectors:
+  # Built-in: Email (always loaded)
+  - name: EMAIL_ADDRESS
+    enabled: true
+    pattern: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    validator: none
+
+  # Built-in: US Phone (always loaded)
+  - name: PHONE_NUMBER
+    enabled: true
+    pattern: null # Uses phonenumbers library
+    region: US
+
+  # Built-in: Credit Card (always loaded)
+  - name: CREDIT_CARD
+    enabled: true
+    pattern: '(?:\d{4}[\s-]?){3}\d{4}'
+    validator: luhn
+
+  # Built-in: US SSN (always loaded)
+  - name: US_SSN
+    enabled: true
+    pattern: '\b\d{3}-\d{2}-\d{4}\b'
+    validator: none
+
+  # Built-in: IPv4 (always loaded)
+  - name: IPV4_ADDRESS
+    enabled: true
+    pattern: '(?:\d{1,3}\.){3}\d{1,3}'
+    validator: ipv4
+
+  # Built-in: IPv6 (always loaded)
+  - name: IPV6_ADDRESS
+    enabled: true
+    pattern: "(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}"
+    validator: none
+
+  # Built-in: MAC Address (always loaded)
+  - name: MAC_ADDRESS
+    enabled: true
+    pattern: "(?:[0-9a-fA-F]{2}[:-]){5}(?:[0-9a-fA-F]{2})"
+    validator: none
+
+  # Built-in: URL (always loaded)
+  - name: URL
+    enabled: true
+    pattern: 'https?://[^\s]+'
+    validator: none
+
+  # ========================================
+  # Custom: Additional PII Types (All Enabled)
+  # ========================================
+
+  # Canadian Social Insurance Number (SIN)
+  - name: CANADIAN_SIN
+    enabled: true
+    pattern: '\b\d{3}-\d{3}-\d{3}\b'
+    validator: canadian_sin
+    description: "Canadian Social Insurance Number"
+
+  # Ontario Driver's License
+  - name: DRIVERS_LICENSE_ON
+    enabled: true
+    pattern: '\b[A-Z]{4}-\d{6}-\d{4}\b'
+    validator: none
+    description: "Ontario Driver's License"
+
+  # British Columbia Driver's License
+  - name: DRIVERS_LICENSE_BC
+    enabled: true
+    pattern: '\b\d{7}\b'
+    validator: none
+    description: "British Columbia Driver's License"
+
+  # UK National Insurance Number
+  - name: UK_NINO
+    enabled: true
+    pattern: '\b[A-Z]{2}\s?\d{6}[A-Z]\b'
+    validator: none
+    description: "UK National Insurance Number"
+
+  # Australian Tax File Number
+  - name: AUSTRALIAN_TFN
+    enabled: true
+    pattern: '\b\d{9}\b'
+    validator: australian_tfn
+    description: "Australian Tax File Number"
+
+  # US Passport
+  - name: US_PASSPORT
+    enabled: true
+    pattern: '\b[A-Z]{1,2}\d{6,9}\b'
+    validator: none
+    description: "US Passport Number"

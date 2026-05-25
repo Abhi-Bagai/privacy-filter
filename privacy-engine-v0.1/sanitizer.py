@@ -1,12 +1,17 @@
-"""PII Detection Logic and Tokenization for Privacy Engine v0.1."""
+"""PII Detection Logic and Tokenization for Privacy Engine v0.1.
+
+Plugin Architecture: Add new PII types via config/detectors.yaml
+"""
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Optional
 
 import phonenumbers
+import yaml
 
 ENTITY_EMAIL = "EMAIL_ADDRESS"
 ENTITY_PHONE = "PHONE_NUMBER"
@@ -24,6 +29,10 @@ TOKEN_SUFFIX = "»"
 TOKEN_ASCII_PREFIX = "[["
 TOKEN_ASCII_SUFFIX = "]]"
 
+# Config path
+CONFIG_DIR = os.path.join(os.path.dirname(__file__), "..", "config")
+DETECTORS_CONFIG = os.path.join(CONFIG_DIR, "detectors.yaml")
+
 
 @dataclass(frozen=True)
 class Span:
@@ -33,7 +42,14 @@ class Span:
     value: str
 
 
+# ============================================================
+# Validators
+# ============================================================
+
+
 class LuhnValidator:
+    """Luhn algorithm validator for credit card numbers."""
+
     @staticmethod
     def is_valid(card_number: str) -> bool:
         digits = re.sub(r"\D", "", card_number)
@@ -51,25 +67,175 @@ class LuhnValidator:
         return total % 10 == 0
 
 
-class Tokenizer:
-    """Generates consistent tokens for PII values within a request.
+class CanadianSINValidator:
+    """Canadian SIN validator using mod-10 algorithm."""
 
-    Token format: «TYPE_N» where N is a counter per type per request.
-    Same value within a request always gets the same token.
+    @staticmethod
+    def is_valid(sin: str) -> bool:
+        # Remove dashes
+        digits = re.sub(r"\D", "", sin)
+        if len(digits) != 9:
+            return False
+
+        # Mod-10 validation
+        total = 0
+        for i, digit in enumerate(digits):
+            n = int(digit)
+            if i % 2 == 0:  # Even positions (0-indexed)
+                n *= 2
+                if n > 9:
+                    n -= 9
+            total += n
+
+        return total % 10 == 0
+
+
+class AustralianTFNValidator:
+    """Australian Tax File Number validator."""
+
+    @staticmethod
+    def is_valid(tfn: str) -> bool:
+        digits = re.sub(r"\D", "", tfn)
+        if len(digits) != 9:
+            return False
+
+        # AUSTRALIAN CHECK DIGIT ALGORITHM
+        weights = [1, 2, 3, 4, 5, 6, 7, 8, 10]
+        total = sum(int(d) * w for d, w in zip(digits, weights))
+        return total % 11 == 0
+
+
+# Validator registry
+VALIDATORS = {
+    "luhn": LuhnValidator.is_valid,
+    "canadian_sin": CanadianSINValidator.is_valid,
+    "australian_tfn": AustralianTFNValidator.is_valid,
+    "none": lambda x: True,
+    "ipv4": lambda x: all(0 <= int(o) <= 255 for o in x.split(".")),
+}
+
+
+# ============================================================
+# Config Loader
+# ============================================================
+
+
+def load_detectors_config() -> dict:
+    """Load detector config from YAML file."""
+    try:
+        with open(DETECTORS_CONFIG, "r") as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        return {"detectors": []}
+
+
+def get_enabled_detectors() -> list[dict]:
+    """Get list of enabled detectors from config."""
+    config = load_detectors_config()
+    return [d for d in config.get("detectors", []) if d.get("enabled", False)]
+
+
+def get_all_detectors() -> list[dict]:
+    """Get all detectors (enabled and disabled) from config."""
+    config = load_detectors_config()
+    return config.get("detectors", [])
+
+
+def add_detector(
+    name: str, pattern: str, validator: str = "none", description: str = ""
+) -> tuple[bool, str]:
+    """Add a new detector to the config file.
+
+    Returns:
+        (success, message)
     """
+    # Validate pattern compiles
+    try:
+        re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        return False, f"Invalid regex pattern: {e}"
+
+    # Validate validator exists
+    if validator not in VALIDATORS:
+        return (
+            False,
+            f"Unknown validator: {validator}. Valid: {list(VALIDATORS.keys())}",
+        )
+
+    # Load existing config
+    config = load_detectors_config()
+    detectors = config.get("detectors", [])
+
+    # Check for duplicate
+    existing_names = [d.get("name") for d in detectors]
+    status = "updated"
+    if name not in existing_names:
+        status = "added"
+
+    # Remove existing if present, then add new
+    detectors = [d for d in detectors if d.get("name") != name]
+    detectors.append(
+        {
+            "name": name,
+            "pattern": pattern,
+            "validator": validator,
+            "description": description,
+            "enabled": True,
+        }
+    )
+
+    config["detectors"] = detectors
+
+    # Save
+    try:
+        with open(DETECTORS_CONFIG, "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+    except IOError as e:
+        return False, f"Failed to write config: {e}"
+
+    return True, status
+
+
+def delete_detector(name: str) -> tuple[bool, str]:
+    """Delete a detector from config.
+
+    Returns:
+        (success, message)
+    """
+    config = load_detectors_config()
+    detectors = config.get("detectors", [])
+
+    original_count = len(detectors)
+    detectors = [d for d in detectors if d.get("name") != name]
+
+    if len(detectors) == original_count:
+        return False, f"Detector not found: {name}"
+
+    config["detectors"] = detectors
+
+    try:
+        with open(DETECTORS_CONFIG, "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+    except IOError as e:
+        return False, f"Failed to write config: {e}"
+
+    return True, f"Detector '{name}' deleted"
+
+
+# ============================================================
+# Tokenizer
+# ============================================================
+
+
+class Tokenizer:
+    """Generates consistent tokens for PII values within a request."""
 
     def __init__(self, use_ascii_fallback: bool = False):
-        """Initialize the tokenizer.
-
-        Args:
-            use_ascii_fallback: If True, use [[TYPE_N]] instead of «TYPE_N».
-        """
         self._use_ascii_fallback = use_ascii_fallback
         self._counters: dict[str, int] = {}
         self._value_to_token: dict[str, tuple[str, str]] = {}
 
     def _make_token(self, entity_type: str) -> str:
-        """Generate a new token for the given entity type."""
         normalized = entity_type.upper().replace(" ", "_")
         count = self._counters.get(normalized, 0) + 1
         self._counters[normalized] = count
@@ -80,24 +246,16 @@ class Tokenizer:
         return f"{prefix}{normalized}_{count}{suffix}"
 
     def _get_type_key(self, value: str, entity_type: str) -> str:
-        """Get a key for value-to-token mapping."""
         return f"{entity_type}:{value}"
 
     def tokenize(self, value: str, entity_type: str) -> str:
-        """Get or create a token for a PII value.
-
-        Same value + same type always returns the same token within a request.
-        """
         key = self._get_type_key(value, entity_type)
-
         if key not in self._value_to_token:
             token = self._make_token(entity_type)
             self._value_to_token[key] = (token, value)
-
         return self._value_to_token[key][0]
 
     def get_replacements(self) -> list[tuple[str, str, str]]:
-        """Get list of (token, type, original_value) tuples."""
         result = []
         for key, (token, original) in self._value_to_token.items():
             entity_type, _ = key.split(":", 1)
@@ -105,8 +263,16 @@ class Tokenizer:
         return result
 
 
+# ============================================================
+# PIIDetector with Plugin Support
+# ============================================================
+
+
 class PIIDetector:
-    PATTERNS = {
+    """Detects PII entities using built-in + YAML-configured detectors."""
+
+    # Built-in patterns (always available)
+    BUILTIN_PATTERNS = {
         ENTITY_EMAIL: re.compile(
             r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", re.IGNORECASE
         ),
@@ -134,26 +300,81 @@ class PIIDetector:
     def __init__(self, allow_list: Optional[list[str]] = None):
         self._allow_list = allow_list or []
         self._luhn = LuhnValidator()
+        self._config_detectors = self._load_config_detectors()
+
+    def _load_config_detectors(self) -> list[dict]:
+        """Load enabled detectors from YAML config."""
+        detectors = []
+        for config in get_enabled_detectors():
+            name = config.get("name")
+            pattern = config.get("pattern")
+            validator_name = config.get("validator", "none")
+
+            if not pattern:  # Skip phone numbers (handled separately)
+                continue
+
+            validator = VALIDATORS.get(validator_name, lambda x: True)
+
+            try:
+                regex = re.compile(pattern, re.IGNORECASE)
+                detectors.append(
+                    {
+                        "name": name,
+                        "pattern": regex,
+                        "validator": validator,
+                    }
+                )
+            except re.error:
+                pass  # Skip invalid patterns
+
+        return detectors
 
     def detect(self, text: str) -> list[Span]:
         spans: list[Span] = []
+
+        # Run built-in detectors
         spans.extend(self._detect_email(text))
         spans.extend(self._detect_phone(text))
         spans.extend(self._detect_credit_card(text))
         spans.extend(self._detect_ssn(text))
         spans.extend(self._detect_ipv4(text))
-        spans.extend(self._detect_mac(text))
         spans.extend(self._detect_ipv6(text))
+        spans.extend(self._detect_mac(text))
         spans.extend(self._detect_api_keys(text))
         spans.extend(self._detect_urls(text))
+
+        # Run config-based detectors (Canadian SIN, Driver's Licenses, etc.)
+        spans.extend(self._detect_config_based(text))
+
         spans.sort(key=lambda s: s.start)
         spans = self._consolidate_spans(spans)
         spans = self._filter_allow_list(text, spans)
         return spans
 
+    def _detect_config_based(self, text: str) -> list[Span]:
+        """Detect using YAML-configured patterns."""
+        spans = []
+        for detector in self._config_detectors:
+            name = detector["name"]
+            pattern = detector["pattern"]
+            validator = detector["validator"]
+
+            for match in pattern.finditer(text):
+                value = match.group()
+                if validator(value):
+                    spans.append(
+                        Span(
+                            start=match.start(),
+                            end=match.end(),
+                            entity_type=name,
+                            value=value,
+                        )
+                    )
+        return spans
+
     def _detect_email(self, text: str) -> list[Span]:
         spans = []
-        for match in self.PATTERNS[ENTITY_EMAIL].finditer(text):
+        for match in self.BUILTIN_PATTERNS[ENTITY_EMAIL].finditer(text):
             spans.append(
                 Span(
                     start=match.start(),
@@ -180,7 +401,7 @@ class PIIDetector:
 
     def _detect_credit_card(self, text: str) -> list[Span]:
         spans = []
-        for match in self.PATTERNS[ENTITY_CREDIT_CARD].finditer(text):
+        for match in self.BUILTIN_PATTERNS[ENTITY_CREDIT_CARD].finditer(text):
             if self._luhn.is_valid(match.group()):
                 spans.append(
                     Span(
@@ -194,7 +415,7 @@ class PIIDetector:
 
     def _detect_ssn(self, text: str) -> list[Span]:
         spans = []
-        for match in self.PATTERNS[ENTITY_SSN].finditer(text):
+        for match in self.BUILTIN_PATTERNS[ENTITY_SSN].finditer(text):
             spans.append(
                 Span(
                     start=match.start(),
@@ -207,10 +428,9 @@ class PIIDetector:
 
     def _detect_ipv4(self, text: str) -> list[Span]:
         spans = []
-        for match in self.PATTERNS[ENTITY_IPV4].finditer(text):
+        for match in self.BUILTIN_PATTERNS[ENTITY_IPV4].finditer(text):
             ip = match.group()
-            octets = ip.split(".")
-            if all(0 <= int(o) <= 255 for o in octets):
+            if all(0 <= int(o) <= 255 for o in ip.split(".")):
                 spans.append(
                     Span(
                         start=match.start(),
@@ -223,7 +443,7 @@ class PIIDetector:
 
     def _detect_ipv6(self, text: str) -> list[Span]:
         spans = []
-        for match in self.PATTERNS[ENTITY_IPV6].finditer(text):
+        for match in self.BUILTIN_PATTERNS[ENTITY_IPV6].finditer(text):
             spans.append(
                 Span(
                     start=match.start(),
@@ -236,7 +456,7 @@ class PIIDetector:
 
     def _detect_mac(self, text: str) -> list[Span]:
         spans = []
-        for match in self.PATTERNS[ENTITY_MAC].finditer(text):
+        for match in self.BUILTIN_PATTERNS[ENTITY_MAC].finditer(text):
             spans.append(
                 Span(
                     start=match.start(),
@@ -263,7 +483,7 @@ class PIIDetector:
 
     def _detect_urls(self, text: str) -> list[Span]:
         spans = []
-        for match in self.PATTERNS[ENTITY_URL].finditer(text):
+        for match in self.BUILTIN_PATTERNS[ENTITY_URL].finditer(text):
             spans.append(
                 Span(
                     start=match.start(),
@@ -289,11 +509,7 @@ class PIIDetector:
     def _filter_allow_list(self, text: str, spans: list[Span]) -> list[Span]:
         if not self._allow_list:
             return spans
-        filtered = []
-        for span in spans:
-            if span.value not in self._allow_list:
-                filtered.append(span)
-        return filtered
+        return [s for s in spans if s.value not in self._allow_list]
 
 
 def tokenize_and_redact(
@@ -301,23 +517,11 @@ def tokenize_and_redact(
     spans: list[Span],
     use_ascii_fallback: bool = False,
 ) -> tuple[str, list[tuple[str, str, str]]]:
-    """Replace detected PII spans with tokens.
-
-    Args:
-        text: The original text.
-        spans: Detected PII spans, sorted by start position (descending for replacement).
-        use_ascii_fallback: If True, use [[TYPE_N]] instead of «TYPE_N».
-
-    Returns:
-        Tuple of (sanitized_text, replacements) where replacements is
-        list of (token, entity_type, original_value).
-    """
+    """Replace detected PII spans with tokens."""
     if not spans:
         return text, []
 
     tokenizer = Tokenizer(use_ascii_fallback=use_ascii_fallback)
-
-    # Sort spans by start position descending (replace from end to start to preserve positions)
     sorted_spans = sorted(spans, key=lambda s: s.start, reverse=True)
 
     result = text
@@ -326,5 +530,4 @@ def tokenize_and_redact(
         result = result[: span.start] + token + result[span.end :]
 
     replacements = tokenizer.get_replacements()
-
     return result, replacements

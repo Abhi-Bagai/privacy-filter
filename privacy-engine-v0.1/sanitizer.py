@@ -338,8 +338,8 @@ class PIIDetector:
         spans.extend(self._detect_credit_card(text))
         spans.extend(self._detect_ssn(text))
         spans.extend(self._detect_ipv4(text))
-        spans.extend(self._detect_ipv6(text))
         spans.extend(self._detect_mac(text))
+        spans.extend(self._detect_ipv6(text))
         spans.extend(self._detect_api_keys(text))
         spans.extend(self._detect_urls(text))
 

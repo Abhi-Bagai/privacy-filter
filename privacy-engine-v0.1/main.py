@@ -208,4 +208,4 @@ async def reload_config():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, uds="/run/privacy-engine.sock")
+    uvicorn.run(app, uds="/opt/privacy-engine/privacy-engine.sock")

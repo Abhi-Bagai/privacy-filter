@@ -7,22 +7,18 @@ Type=simple
 User=privacy-engine
 Group=privacy-engine
 WorkingDirectory=/opt/privacy-engine
-ExecStart=/usr/bin/python3 -m uvicorn main:app --uds /run/privacy-engine/privacy-engine.sock
+ExecStart=/usr/bin/python3 -m uvicorn main:app --uds /opt/privacy-engine/privacy-engine.sock
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
 Environment="PYTHONUNBUFFERED=1"
 
-# Socket directory created and owned by privacy-engine user before start
-RuntimeDirectory=privacy-engine
-RuntimeDirectoryMode=0750
-
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/run/privacy-engine
+ReadWritePaths=/opt/privacy-engine
 PrivateTmp=true
 
 # Hardening: disable core dumps

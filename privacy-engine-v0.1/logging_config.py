@@ -40,7 +40,7 @@ def configure_logging() -> None:
     )
 
 
-def _json_serializer(obj: Any) -> str:
+def _json_serializer(obj: Any, **kwargs) -> str:
     """Serialize object to JSON string."""
     return json.dumps(obj, default=str, separators=(",", ":"))
 
